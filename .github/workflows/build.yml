@@ -21,15 +21,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install platformio
 
-      - name: List PIO environments
+      - name: Locate PlatformIO project dir
+        id: pio
+        run: |
+          set -e
+          FILE="$(git ls-files | grep -m1 -E '^.*platformio\.ini$' || true)"
+          if [ -z "$FILE" ]; then
+            echo "ERROR: platformio.ini not found anywhere in repo." >&2
+            echo "Tips: letakkan file platformio.ini di root atau subfolder proyek." >&2
+            exit 1
+          fi
+          DIR="$(dirname "$FILE")"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Found platformio.ini at: $DIR"
+
+      - name: Show env list
+        working-directory: ${{ steps.pio.outputs.dir }}
         run: pio run -t envlist || true
 
-      # GANTI nama env di bawah ini sesuai env "penuh" milikmu
+      # GANTI 'full-esp32dev' dengan nama env "full" milikmu jika berbeda
       - name: Build full ESP32
+        working-directory: ${{ steps.pio.outputs.dir }}
         run: pio run -e full-esp32dev
 
-      - name: Upload build artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-bins
-          path: .pio/build/*/*.bin
+          path: ${{ steps.pio.outputs.dir }}/.pio/build/*/*.bin
