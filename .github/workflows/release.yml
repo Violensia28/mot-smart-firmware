@@ -3,22 +3,20 @@ name: Release (ESP32 full)
 on:
   push:
     tags:
-      - 'v*.*.*'   # contoh: v0.3.1
+      - 'v*.*.*'
 
 jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write   # perlu untuk membuat Release & upload aset
+      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -27,29 +25,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install platformio
 
-      - name: Derive version from tag
-        id: ver
+      - name: Locate PlatformIO project dir
+        id: pio
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+          set -e
+          FILE="$(git ls-files | grep -m1 -E '^.*platformio\.ini$' || true)"
+          if [ -z "$FILE" ]; then
+            echo "ERROR: platformio.ini not found." >&2
+            exit 1
+          fi
+          DIR="$(dirname "$FILE")"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Found platformio.ini at: $DIR"
 
-      - name: List PIO environments
+      - name: Show env list
+        working-directory: ${{ steps.pio.outputs.dir }}
         run: pio run -t envlist || true
 
-      # GANTI env di bawah agar sesuai dengan "full" milikmu
+      # GANTI 'full-esp32dev' kalau env "full" kamu namanya lain
       - name: Build full ESP32
+        working-directory: ${{ steps.pio.outputs.dir }}
         run: pio run -e full-esp32dev
 
       - name: Prepare release assets
+        id: prep
+        working-directory: ${{ steps.pio.outputs.dir }}
         run: |
+          set -e
           mkdir -p dist
-          # salin semua bin hasil build
-          cp .pio/build/*/bootloader*.bin dist/bootloader.bin || true
-          cp .pio/build/*/partitions*.bin dist/partitions.bin || true
+          cp .pio/build/*/bootloader*.bin dist/bootloader.bin 2>/dev/null || true
+          cp .pio/build/*/partitions*.bin dist/partitions.bin 2>/dev/null || true
           cp .pio/build/*/firmware.bin    dist/firmware.bin
 
-          # buat offsets & readme Android
           cat > dist/offsets.txt <<'EOF'
 # ESP32 flash offsets (default)
 bootloader.bin  @ 0x1000
@@ -61,35 +68,26 @@ EOF
           cat > dist/readme_android.md <<'EOF'
 # Flash dari Android (USB-OTG)
 1) Install **ESP32_flash** (Play Store).
-2) Hubungkan ESP32 ke Android via OTG. Masuk bootloader (tahan BOOT, tekan- lepas EN/RST, lepas BOOT).
+2) Hubungkan ESP32 ke Android via OTG. Masuk bootloader (tahan BOOT, tekan-lepas EN/RST, lepas BOOT).
 3) Flash 3 file dengan offset:
    - bootloader.bin → 0x1000
    - partitions.bin → 0x8000
    - firmware.bin   → 0x10000
 
 # Update OTA (opsional)
-Jika firmware “full” sudah punya OTA handler dan partisi OTA, cukup unggah `firmware.bin` dari Web UI/OTA app.
+Jika firmware “full” sudah punya OTA handler dan partisi OTA, upload `firmware.bin` saja via Web UI/OTA app.
 EOF
 
-          # checksum
           (cd dist && sha256sum * > SHA256SUMS.txt)
-
-          # bundel zip rilis
-          ZIP="motsmart_full_esp32_${{ steps.ver.outputs.version }}.zip"
+          ZIP="motsmart_full_esp32_${GITHUB_REF_NAME#refs/tags/}.zip"
           (cd dist && zip -9 ../$ZIP *)
-          echo "zipname=$ZIP" >> $GITHUB_OUTPUT
-        shell: bash
+          echo "zipname=$ZIP" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          name: "mot-smart-firmware ${{
-            steps.ver.outputs.tag }} (ESP32 full)"
-          draft: false
-          prerelease: false
+          tag_name: ${{ github.ref_name }}
+          name: "mot-smart-firmware ${{ github.ref_name }} (ESP32 full)"
           files: |
-            dist/SHA256SUMS.txt
-            ${{ steps.prepare_release_assets.outputs.zipname }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ${{ steps.pio.outputs.dir }}/${{ steps.prep.outputs.zipname }}
+            ${{ steps.pio.outputs.dir }}/dist/SHA256SUMS.txt
