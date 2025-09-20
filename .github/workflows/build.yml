@@ -1,0 +1,35 @@
+name: CI Build (ESP32 full)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: List PIO environments
+        run: pio run -t envlist || true
+
+      # GANTI nama env di bawah ini sesuai env "penuh" milikmu
+      - name: Build full ESP32
+        run: pio run -e full-esp32dev
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-bins
+          path: .pio/build/*/*.bin
